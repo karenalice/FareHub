@@ -25,8 +25,11 @@ Esses valores também aparecem nos resultados da página. O **share total** é a
 tarifa total da menor opção de uma companhia dividida pela soma das tarifas
 totais das companhias exibidas no mesmo trecho e dia. O **share net** usa o
 mesmo cálculo com as tarifas net. Os percentuais refletem as opções da pesquisa,
-não participação de mercado. O arquivo exportado separa os dias em abas e,
-dentro de cada aba, agrupa os resultados por trecho com os dois shares.
+não participação de mercado. O arquivo exportado inclui a aba inicial **Planilha Simples**
+(tabela consolidada com todas as opções encontradas, contendo ADVP, Data da viagem,
+Origem, Destino, Cia, Número do voo, Hora do voo, Trecho, Tarifa net, Taxa e Tarifa total),
+além das abas detalhadas por dia com agrupamento por trecho e shares, e a aba
+**Comparativo Cia vs Cia**.
 
 O sistema também inclui o painel **Comparativo Cia vs Cia**, calculando a diferença
 percentual direta entre companhias que operam o mesmo trecho na mesma data

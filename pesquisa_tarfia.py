@@ -501,6 +501,53 @@ def make_xlsx(rows, example=False):
         sheets = [ws]
     else:
         wb.remove(ws)
+
+        # 1. Aba 'Planilha Simples' (tabela consolidada sem divisões)
+        ws_simple = wb.create_sheet("Planilha Simples")
+        headers_simple = [
+            "ADVP", "Data da viagem", "Origem", "Destino", "Cia",
+            "Número do voo", "Hora do voo", "Trecho",
+            "Tarifa net (BRL)", "Taxa (BRL)", "Tarifa total (BRL)"
+        ]
+        ws_simple.append(headers_simple)
+        for cell in ws_simple[1]:
+            cell.fill = PatternFill("solid", fgColor="087CBC")
+            cell.font = Font(color="FFFFFF", bold=True)
+            cell.alignment = Alignment(horizontal="center")
+
+        for row in rows:
+            total = row.get("preco_total", row.get("tarifa")) or 0.0
+            fee = row.get("taxa_embarque", 0) or 0.0
+            net = row.get("tarifa_net")
+            if net is None and isinstance(total, (int, float)):
+                net = round(float(total) - float(fee), 2)
+
+            ws_simple.append([
+                row.get("advp"),
+                row.get("data"),
+                row.get("origem"),
+                row.get("destino"),
+                row.get("cia"),
+                row.get("voo"),
+                row.get("hora"),
+                row.get("trecho"),
+                net,
+                fee,
+                total
+            ])
+            curr_row = ws_simple.max_row
+            ws_simple.cell(curr_row, 9).number_format = '"R$" #,##0.00'
+            ws_simple.cell(curr_row, 10).number_format = '"R$" #,##0.00'
+            ws_simple.cell(curr_row, 11).number_format = '"R$" #,##0.00'
+
+        ws_simple.freeze_panes = "A2"
+        if rows:
+            ws_simple.auto_filter.ref = ws_simple.dimensions
+        for index, col in enumerate(ws_simple.columns, start=1):
+            letter = get_column_letter(index)
+            ws_simple.column_dimensions[letter].width = min(35, max(12, max(len(str(c.value or "")) for c in col if c.value is not None) + 3))
+
+        # 2. Abas detalhadas por dia e trecho (com cálculo de shares)
         days = {}
         for row in rows:
             day = (row.get("advp"), row.get("data"))
@@ -508,7 +555,7 @@ def make_xlsx(rows, example=False):
         if not days:
             days[(None, None)] = {}
         for (advp, departure), routes in days.items():
-            title = f"{advp} dias" if advp is not None else "Tarifas"
+            title = f"{advp} dias" if advp is not None else "Tarifas Detalhadas"
             if title in wb.sheetnames:
                 title = f"{title} {len(wb.sheetnames) + 1}"
             ws = wb.create_sheet(title)
