@@ -80,6 +80,10 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               Baixar planilha modelo
             </a>
+            <button type="button" id="btn-open-modal-instructions" class="btn-sheet-help" title="Ver orientações da planilha modelo">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span>Orientações</span>
+            </button>
           </div>
 
           <!-- Filtro de Companhias -->
@@ -269,6 +273,79 @@
         </table>
       </div>
     </section>
+
+    <!-- Modal de Orientações da Planilha Modelo -->
+    <div id="modal-sheet-instructions" class="modal-backdrop" hidden>
+      <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-header">
+          <div class="modal-title-wrap">
+            <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="16" x2="12" y2="12"></line>
+              <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </svg>
+            <h3 id="modal-title">Orientações da Planilha Modelo</h3>
+          </div>
+          <button type="button" class="modal-close" id="modal-close-btn" aria-label="Fechar modal">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-intro">
+            A planilha modelo foi estruturada para pesquisa em lote e cálculo automático de tarifas líquidas e shares:
+          </p>
+          <ul class="modal-checklist">
+            <li>
+              <strong>Colunas de Trecho:</strong> <code>origem</code> e <code>destino</code> (códigos IATA de 3 letras, ex: <code>CGB</code>, <code>GRU</code>).
+            </li>
+            <li>
+              <strong>Taxas de Embarque:</strong> <code>taxa latam</code>, <code>taxa gol</code> e <code>taxa azul</code> para informar valores em R$ por trecho.
+            </li>
+            <li>
+              <strong>Células Vazias:</strong> Trechos sem taxa preenchida assumem R$ 0,00 ou a taxa oficial da API.
+            </li>
+            <li>
+              <strong>Resultados e Exportação:</strong> O XLSX gerado separa abas por dia, com Tarifa Net (<code>Total − Taxa</code>), Shares por Trecho e a aba <strong>Comparativo Cia vs Cia</strong>.
+            </li>
+          </ul>
+          <div class="modal-sample-preview">
+            <div class="preview-title">Estrutura das Colunas:</div>
+            <table class="preview-table">
+              <thead>
+                <tr>
+                  <th>origem</th>
+                  <th>destino</th>
+                  <th>taxa latam</th>
+                  <th>taxa gol</th>
+                  <th>taxa azul</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>CGB</td>
+                  <td>GRU</td>
+                  <td>35,00</td>
+                  <td>35,00</td>
+                  <td>35,00</td>
+                </tr>
+                <tr>
+                  <td>GRU</td>
+                  <td>GIG</td>
+                  <td>0,00</td>
+                  <td>0,00</td>
+                  <td>0,00</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <a class="btn-link-sample" href="/exemplo.xlsx" download>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Baixar Modelo (.xlsx)
+          </a>
+          <button type="button" class="btn-primary-sm" id="modal-ok-btn" style="min-width: 80px; height: 32px;">Entendido</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <script>
@@ -402,6 +479,23 @@
       inputs.hidden = !isHidden;
       arrow.textContent = isHidden ? '▾' : '▸';
     };
+
+    // Modal de orientações da planilha modelo
+    const sheetModal = $('modal-sheet-instructions');
+    const openSheetModal = () => { sheetModal.hidden = false; };
+    const closeSheetModal = () => { sheetModal.hidden = true; };
+
+    $('btn-open-modal-instructions').onclick = openSheetModal;
+    $('modal-close-btn').onclick = closeSheetModal;
+    $('modal-ok-btn').onclick = closeSheetModal;
+
+    sheetModal.addEventListener('click', e => {
+      if (e.target === sheetModal) closeSheetModal();
+    });
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !sheetModal.hidden) closeSheetModal();
+    });
 
     // Carregar Consumo e atualizar total de requisições no topo
     async function loadUsage() {
