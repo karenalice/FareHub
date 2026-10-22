@@ -452,6 +452,47 @@ html, body {
   to { transform: rotate(360deg); }
 }
 
+.fees-toggle-area {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-light);
+}
+
+.btn-toggle-fees {
+  background: transparent;
+  border: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: color 0.12s ease;
+}
+
+.btn-toggle-fees:hover {
+  color: var(--primary);
+}
+
+.fees-inputs {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.fee-input {
+  flex: 1 1 140px;
+}
+
+.fee-input input {
+  height: 32px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
 .search-status-bar {
   display: flex;
   align-items: center;
@@ -486,15 +527,180 @@ html, body {
 }
 
 /* ==========================================================================
-   4. Painel de Resultados (100% largura)
+   4. Painéis de Resultados e Análises (100% largura)
    ========================================================================== */
 
 .results-panel,
+.comparison-panel,
+.share-panel,
 .usage-panel {
   width: 100%;
   background: #ffffff;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+.comparison-panel,
+.share-panel {
+  margin-top: 16px;
+}
+
+/* Diferença Cia vs Cia */
+.badge-dif {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: var(--radius);
+  white-space: nowrap;
+}
+
+.dif-advantage {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid var(--success-border);
+}
+
+.dif-disadvantage {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger-border);
+}
+
+.dif-neutral {
+  background: #f1f5f9;
+  color: var(--text-subtle);
+  border: 1px solid var(--border-light);
+}
+
+.summary-advantage {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius);
+}
+
+/* Share Badges e Grid */
+.badge-share {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: #f1f5f9;
+  border: 1px solid var(--border-light);
+  padding: 2px 6px;
+  border-radius: var(--radius);
+}
+
+.share-grid {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 16px;
+}
+
+.share-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.share-card-header {
+  padding: 9px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.share-route-section {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.share-route-section:last-child {
+  border-bottom: none;
+}
+
+.share-route-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary-hover);
+  margin-bottom: 8px;
+}
+
+.share-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.share-subtable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.share-subtable th {
+  background: #f1f5f9;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.share-subtable td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-main);
+}
+
+.share-subtable tr:last-child td {
+  border-bottom: none;
+}
+
+.share-bar-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mini-bar-track {
+  width: 50px;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.mini-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.bar-net {
+  background: #0284c7;
+}
+
+.bar-total {
+  background: #047857;
+}
+
+.share-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
 }
 
 .panel-header {

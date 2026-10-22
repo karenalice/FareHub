@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <!-- Cabeçalho Principal (Largura total, Esquerda: Logo/Nome, Centro: Menu, Direita: Requisições/Data) -->
+  <!-- Cabeçalho Principal (100% largura) -->
   <header class="app-header">
     <div class="header-container">
       <!-- Esquerda: Marca -->
@@ -33,7 +33,7 @@
     </div>
   </header>
 
-  <!-- Área Principal (Largura Total da Página) -->
+  <!-- Área Principal (100% da Largura da Página) -->
   <main class="app-main">
     <!-- Barra de Pesquisa -->
     <section class="search-panel" id="search-panel">
@@ -80,7 +80,6 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               Baixar planilha modelo
             </a>
-            <p class="sheet-fee-note"><strong>A planilha modelo já vem com as colunas:</strong> origem, destino, taxa latam, taxa gol e taxa azul. Preencha a taxa de embarque em BRL para cada companhia e trecho. Células vazias valem R$ 0,00. O XLSX de resultados terá Taxa e Tarifa net = total da API − taxa.</p>
           </div>
 
           <!-- Filtro de Companhias -->
@@ -116,6 +115,27 @@
           </div>
         </div>
 
+        <!-- Taxas de Embarque Opcionais para Consulta Avulsa -->
+        <div id="fees-toggle-area" class="fees-toggle-area">
+          <button type="button" id="btn-toggle-fees" class="btn-toggle-fees">
+            <span id="fees-arrow">▸</span> Taxas de embarque (opcional)
+          </button>
+          <div id="fees-inputs" class="fees-inputs" hidden>
+            <div class="input-block fee-input">
+              <label for="fee_latam">Taxa LATAM (R$)</label>
+              <input id="fee_latam" name="fee_latam" placeholder="0,00" autocomplete="off">
+            </div>
+            <div class="input-block fee-input">
+              <label for="fee_gol">Taxa GOL (R$)</label>
+              <input id="fee_gol" name="fee_gol" placeholder="0,00" autocomplete="off">
+            </div>
+            <div class="input-block fee-input">
+              <label for="fee_azul">Taxa Azul (R$)</label>
+              <input id="fee_azul" name="fee_azul" placeholder="0,00" autocomplete="off">
+            </div>
+          </div>
+        </div>
+
         <!-- Barra de Progresso durante a busca -->
         <div id="search-status-bar" class="search-status-bar" hidden>
           <span class="status-pulse"></span>
@@ -126,11 +146,11 @@
       </form>
     </section>
 
-    <!-- Painel de Resultados (100% da largura) -->
+    <!-- Painel 1: Tabela Principal de Tarifas (100% da largura) -->
     <section class="results-panel" id="results-panel">
       <div class="panel-header">
         <div class="panel-title-area">
-          <h2>Resultados</h2>
+          <h2>Tarifas e Shares</h2>
           <span id="result-summary" class="result-summary-badge" hidden>0 voos</span>
         </div>
 
@@ -158,21 +178,64 @@
               <th>Voo</th>
               <th>Horário</th>
               <th>Trecho</th>
+              <th>Tarifa Net</th>
+              <th>Taxa</th>
               <th>Tarifa Total</th>
-              <th>Classe</th>
+              <th>Share Net</th>
+              <th>Share Total</th>
               <th>Fonte</th>
             </tr>
           </thead>
           <tbody id="results">
             <tr class="empty-row">
-              <td colspan="8">Informe os dados acima e clique em Pesquisar</td>
+              <td colspan="11">Informe os dados acima e clique em Pesquisar</td>
             </tr>
           </tbody>
         </table>
       </div>
     </section>
 
-    <!-- Painel de Consumo das APIs (100% da largura) -->
+    <!-- Painel 2: Comparativo Cia vs Cia (Diferença Percentual entre Companhias no mesmo trecho) -->
+    <section class="comparison-panel" id="comparison-panel" hidden>
+      <div class="panel-header">
+        <div class="panel-title-area">
+          <h2>Comparativo Cia vs Cia (Diferença entre Companhias)</h2>
+        </div>
+      </div>
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Trecho</th>
+              <th>Data / ADVP</th>
+              <th>Comparação</th>
+              <th>Tarifa Net A</th>
+              <th>Tarifa Net B</th>
+              <th>Diferença Net</th>
+              <th>Tarifa Total A</th>
+              <th>Tarifa Total B</th>
+              <th>Diferença Total</th>
+              <th>Resumo da Vantagem</th>
+            </tr>
+          </thead>
+          <tbody id="comparisons-tbody">
+            <tr class="empty-row"><td colspan="10">Nenhuma comparação disponível</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Painel 3: Resumo de Share por Trecho e Dia -->
+    <section class="share-panel" id="share-panel" hidden>
+      <div class="panel-header">
+        <div class="panel-title-area">
+          <h2>Share por Trecho e Dia</h2>
+        </div>
+      </div>
+      <div id="share-groups" class="share-grid"></div>
+    </section>
+
+    <!-- Painel 4: Consumo das APIs (100% da largura) -->
     <section class="usage-panel" id="usage-panel" hidden>
       <div class="panel-header">
         <div class="panel-title-area">
@@ -211,6 +274,7 @@
   <script>
     const $ = id => document.getElementById(id);
     let currentRows = [];
+    let currentComparisons = [];
     let currentFilter = 'all';
 
     // Formatar data no padrão brasileiro DD/MM/AAAA
@@ -235,9 +299,23 @@
     }
 
     function money(v) {
-      if (v === null || v === undefined) return 'Não informado';
+      if (v === null || v === undefined) return '—';
       return Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     }
+
+    function pct(v) {
+      if (v === null || v === undefined) return '—';
+      return `${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+    }
+
+    // Toggle de taxas opcionais no form avulso
+    $('btn-toggle-fees').addEventListener('click', () => {
+      const inputs = $('fees-inputs');
+      const arrow = $('fees-arrow');
+      const isHidden = inputs.hidden;
+      inputs.hidden = !isHidden;
+      arrow.textContent = isHidden ? '▾' : '▸';
+    });
 
     // Auto-uppercase nos campos IATA e avanço automático de foco
     ['origin', 'destination'].forEach(id => {
@@ -283,11 +361,14 @@
 
       $('search-panel').hidden = isUsage;
       $('results-panel').hidden = isUsage;
+      $('comparison-panel').hidden = isUsage || !currentComparisons.length;
+      $('share-panel').hidden = isUsage || !currentRows.length;
       $('usage-panel').hidden = !isUsage;
 
       $('single-fields').hidden = isSheet;
       $('date-fields').hidden = !isDate;
       $('sheet-fields').hidden = !isSheet;
+      $('fees-toggle-area').hidden = isSheet;
 
       $('tab-single').classList.toggle('active', mode === 'single');
       $('tab-date').classList.toggle('active', isDate);
@@ -313,6 +394,15 @@
     $('tab-usage').onclick = () => setMode('consumo');
     setMode('single');
 
+    // Toggle de taxas opcionais de embarque
+    $('btn-toggle-fees').onclick = () => {
+      const inputs = $('fees-inputs');
+      const arrow = $('fees-arrow');
+      const isHidden = inputs.hidden;
+      inputs.hidden = !isHidden;
+      arrow.textContent = isHidden ? '▾' : '▸';
+    };
+
     // Carregar Consumo e atualizar total de requisições no topo
     async function loadUsage() {
       try {
@@ -326,13 +416,13 @@
         }
 
         $('usage').innerHTML = data.map(x => {
-          let pct = 0;
+          let p = 0;
           if (x.limit && x.used !== null && x.used !== undefined) {
-            pct = Math.min(100, Math.round((x.used / x.limit) * 100));
+            p = Math.min(100, Math.round((x.used / x.limit) * 100));
           } else if (x.limit && x.remaining !== null && x.remaining !== undefined) {
-            pct = Math.min(100, Math.round(((x.limit - x.remaining) / x.limit) * 100));
+            p = Math.min(100, Math.round(((x.limit - x.remaining) / x.limit) * 100));
           }
-          const barColor = pct > 85 ? '#dc2626' : pct > 60 ? '#d97706' : '#0284c7';
+          const barColor = p > 85 ? '#dc2626' : p > 60 ? '#d97706' : '#0284c7';
 
           return `<tr>
             <td><strong>${escapeHtml(x.id)}</strong></td>
@@ -342,8 +432,8 @@
             <td>${fmt(x.limit)}</td>
             <td>
               <div class="quota-meter">
-                <div class="quota-bar" style="width: ${pct}%; background: ${barColor}"></div>
-                <span>${pct}%</span>
+                <div class="quota-bar" style="width: ${p}%; background: ${barColor}"></div>
+                <span>${p}%</span>
               </div>
             </td>
             <td>${fmt(x.attempts)}</td>
@@ -378,11 +468,11 @@
       }
     };
 
-    // Renderizar tabela de resultados
+    // Renderizar tabela de tarifas
     function renderResults() {
       const tbody = $('results');
       if (!currentRows.length) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="8">Nenhum voo encontrado.</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="11">Nenhum voo encontrado.</td></tr>';
         return;
       }
 
@@ -391,7 +481,7 @@
         : currentRows.filter(r => (r.cia || '').toUpperCase().includes(currentFilter.toUpperCase()));
 
       if (!rows.length) {
-        tbody.innerHTML = `<tr class="empty-row"><td colspan="8">Nenhum voo para a companhia ${escapeHtml(currentFilter)}.</td></tr>`;
+        tbody.innerHTML = `<tr class="empty-row"><td colspan="11">Nenhum voo para a companhia ${escapeHtml(currentFilter)}.</td></tr>`;
         return;
       }
 
@@ -412,6 +502,9 @@
         else if (ciaUpper.includes('AZUL')) ciaClass = 'cia-azul';
 
         const advpLabel = x.advp !== null && x.advp !== undefined ? `${x.advp}d` : '';
+        const netVal = x.tarifa_net ?? x.preco_total;
+        const feeVal = x.taxa_embarque ?? 0;
+        const totalVal = x.preco_total;
 
         return `<tr>
           <td>
@@ -424,14 +517,125 @@
           <td class="cell-mono"><strong>${escapeHtml(x.voo)}</strong></td>
           <td>${escapeHtml(x.hora)}</td>
           <td><strong>${escapeHtml(x.trecho)}</strong></td>
+          <td class="price-cell"><strong>${money(netVal)}</strong></td>
+          <td>${money(feeVal)}</td>
           <td class="price-cell">
-            <span class="price-val ${isLowest ? 'best-price' : ''}">${x.total_aproximado ? '≈ ' : ''}${money(x.preco_total)}</span>
+            <span class="price-val ${isLowest ? 'best-price' : ''}">${x.total_aproximado ? '≈ ' : ''}${money(totalVal)}</span>
             ${isLowest ? '<span class="badge-best">Menor</span>' : ''}
           </td>
-          <td>${escapeHtml(x.classe)}</td>
+          <td><span class="badge-share">${pct(x.share_net)}</span></td>
+          <td><span class="badge-share">${pct(x.share_total)}</span></td>
           <td class="cell-source">${escapeHtml(x.fonte || '—')}</td>
         </tr>`;
       }).join('');
+    }
+
+    // Renderizar quadro de comparativo Cia vs Cia
+    function renderComparisons() {
+      const panel = $('comparison-panel');
+      const tbody = $('comparisons-tbody');
+      if (!currentComparisons || !currentComparisons.length || $('mode').value === 'consumo') {
+        panel.hidden = true;
+        tbody.innerHTML = '';
+        return;
+      }
+      panel.hidden = false;
+
+      tbody.innerHTML = currentComparisons.map(c => {
+        const netDif = c.dif_net;
+        const totDif = c.dif_total;
+        const netBadgeClass = netDif === null ? '' : netDif < 0 ? 'dif-advantage' : netDif > 0 ? 'dif-disadvantage' : 'dif-neutral';
+        const totBadgeClass = totDif === null ? '' : totDif < 0 ? 'dif-advantage' : totDif > 0 ? 'dif-disadvantage' : 'dif-neutral';
+        const netSign = netDif !== null && netDif > 0 ? '+' : '';
+        const totSign = totDif !== null && totDif > 0 ? '+' : '';
+
+        return `<tr>
+          <td><strong>${escapeHtml(c.trecho)}</strong></td>
+          <td>${c.advp !== null ? `${escapeHtml(c.advp)}d · ` : ''}${escapeHtml(c.data)}</td>
+          <td><strong>${escapeHtml(c.cia_a)}</strong> vs <strong>${escapeHtml(c.cia_b)}</strong></td>
+          <td>${money(c.net_a)}</td>
+          <td>${money(c.net_b)}</td>
+          <td><span class="badge-dif ${netBadgeClass}">${netDif !== null ? `${netSign}${netDif.toFixed(1)}%` : '—'}</span></td>
+          <td>${money(c.tot_a)}</td>
+          <td>${money(c.tot_b)}</td>
+          <td><span class="badge-dif ${totBadgeClass}">${totDif !== null ? `${totSign}${totDif.toFixed(1)}%` : '—'}</span></td>
+          <td><span class="summary-advantage ${netBadgeClass}">${escapeHtml(c.resumo_total)}</span></td>
+        </tr>`;
+      }).join('');
+    }
+
+    // Renderizar quadro de Share por trecho e dia
+    function renderShareSummary() {
+      const panel = $('share-panel');
+      const groups = $('share-groups');
+      const rows = currentRows.filter(r => r.share_total !== null && r.share_total !== undefined);
+      if (!rows.length || $('mode').value === 'consumo') {
+        panel.hidden = true;
+        groups.innerHTML = '';
+        return;
+      }
+      panel.hidden = false;
+
+      const days = new Map();
+      rows.forEach(r => {
+        const dayKey = `${r.advp}|${r.data}`;
+        if (!days.has(dayKey)) days.set(dayKey, { advp: r.advp, data: r.data, routes: new Map() });
+        const day = days.get(dayKey);
+        const routeKey = `${r.origem}|${r.destino}`;
+        if (!day.routes.has(routeKey)) day.routes.set(routeKey, { origem: r.origem, destino: r.destino, rows: [] });
+        day.routes.get(routeKey).rows.push(r);
+      });
+
+      groups.innerHTML = [...days.values()].map(day => `
+        <article class="share-card">
+          <div class="share-card-header">
+            <strong>${escapeHtml(day.advp)} dias · ${escapeHtml(day.data)}</strong>
+          </div>
+          ${[...day.routes.values()].map(route => `
+            <div class="share-route-section">
+              <div class="share-route-title">${escapeHtml(route.origem)} → ${escapeHtml(route.destino)}</div>
+              <div class="share-table-wrap">
+                <table class="share-subtable">
+                  <thead>
+                    <tr>
+                      <th>Companhia</th>
+                      <th>Tarifa Net</th>
+                      <th>Share Net</th>
+                      <th>Tarifa Total</th>
+                      <th>Share Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${route.rows.map(r => `
+                      <tr>
+                        <td><strong>${escapeHtml(r.cia)}</strong></td>
+                        <td>${money(r.tarifa_net ?? r.preco_total)}</td>
+                        <td>
+                          <div class="share-bar-cell">
+                            <div class="mini-bar-track">
+                              <div class="mini-bar-fill bar-net" style="width: ${r.share_net || 0}%"></div>
+                            </div>
+                            <span class="share-num">${pct(r.share_net)}</span>
+                          </div>
+                        </td>
+                        <td>${money(r.preco_total)}</td>
+                        <td>
+                          <div class="share-bar-cell">
+                            <div class="mini-bar-track">
+                              <div class="mini-bar-fill bar-total" style="width: ${r.share_total || 0}%"></div>
+                            </div>
+                            <span class="share-num">${pct(r.share_total)}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `).join('')}
+        </article>
+      `).join('');
     }
 
     // Filtros por Cia
@@ -453,6 +657,8 @@
       $('submit-text').textContent = 'Consultando...';
       $('search-status-bar').hidden = false;
       $('export').hidden = true;
+      $('share-panel').hidden = true;
+      $('comparison-panel').hidden = true;
       $('airline-filters').hidden = true;
       $('result-summary').hidden = true;
 
@@ -468,6 +674,7 @@
         if (!r.ok) throw new Error(result.error || 'Erro na pesquisa.');
 
         currentRows = result.rows || [];
+        currentComparisons = result.comparisons || [];
         currentFilter = 'all';
         document.querySelectorAll('.filter-chip').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
 
@@ -475,6 +682,8 @@
         $('result-summary').hidden = false;
 
         renderResults();
+        renderComparisons();
+        renderShareSummary();
 
         if (currentRows.length > 0) {
           $('airline-filters').hidden = false;

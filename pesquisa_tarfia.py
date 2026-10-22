@@ -17,6 +17,7 @@ from uuid import uuid4
 from flask import Flask, jsonify, render_template, request, send_file
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 import requests
 
 
@@ -61,13 +62,11 @@ def configured_apis():
     })
     for idx in serp_indices:
         key = os.environ.get(f"SERPAPI_KEY_{idx}", "").strip()
-        name = os.environ.get(f"SERPAPI_NAME_{idx}", "").strip() or f"Conta {idx}"
         if key and key not in seen_keys:
             seen_keys.add(key)
             accounts.append({
-                "id": f"SerpApi {idx} ({name})",
+                "id": f"SerpApi {idx}",
                 "provider": "SerpApi",
-                "account": name,
                 "key": key
             })
 
@@ -78,13 +77,11 @@ def configured_apis():
     })
     for idx in rapid_indices:
         key = os.environ.get(f"RAPIDAPI_KEY_{idx}", "").strip()
-        name = os.environ.get(f"RAPIDAPI_NAME_{idx}", "").strip() or f"Conta {idx}"
         if key and key not in seen_keys:
             seen_keys.add(key)
             accounts.append({
-                "id": f"RapidAPI {idx} ({name})",
+                "id": f"RapidAPI {idx}",
                 "provider": "RapidAPI",
-                "account": name,
                 "key": key
             })
 
@@ -94,9 +91,8 @@ def configured_apis():
         if val and val not in seen_keys:
             seen_keys.add(val)
             accounts.append({
-                "id": "SerpApi Principal",
+                "id": "SerpApi 1",
                 "provider": "SerpApi",
-                "account": "Principal",
                 "key": val
             })
             break
@@ -106,34 +102,37 @@ def configured_apis():
         if val and val not in seen_keys:
             seen_keys.add(val)
             accounts.append({
-                "id": "RapidAPI Principal",
+                "id": "RapidAPI 1",
                 "provider": "RapidAPI",
-                "account": "Principal",
                 "key": val
             })
             break
 
-    # 4. Formato legado do .env por seções
+    # 4. Formato legado do .env por seções (sem expor emails)
     if not accounts and (ROOT / ".env").exists():
-        account = None
+        serp_count = 0
+        rapid_count = 0
         for raw in (ROOT / ".env").read_text(encoding="utf-8-sig").splitlines():
             line = raw.strip()
-            if line.upper().startswith("#CHAVE API'S EMAIL"):
-                account = line.split("EMAIL", 1)[1].strip()
-            elif line.startswith("#CHAVE API'S"):
-                account = line.removeprefix("#CHAVE API'S").strip()
-            elif "=" in line and not line.startswith("#"):
+            if "=" in line and not line.startswith("#"):
                 key, value = line.split("=", 1)
                 key, value = key.strip(), value.strip().strip('"\'')
                 if key in ("CHAVE_API_SERPAPI", "CHAVE_API_RAPIDAPI") and value and value not in seen_keys:
                     seen_keys.add(value)
-                    provider = "SerpApi" if key.endswith("SERPAPI") else "RapidAPI"
-                    accounts.append({
-                        "id": f"{provider} {len(accounts) + 1} ({account or 'Conta'})",
-                        "provider": provider,
-                        "account": account or "Conta",
-                        "key": value
-                    })
+                    if key.endswith("SERPAPI"):
+                        serp_count += 1
+                        accounts.append({
+                            "id": f"SerpApi {serp_count}",
+                            "provider": "SerpApi",
+                            "key": value
+                        })
+                    else:
+                        rapid_count += 1
+                        accounts.append({
+                            "id": f"RapidAPI {rapid_count}",
+                            "provider": "RapidAPI",
+                            "key": value
+                        })
 
     return accounts
 
@@ -370,7 +369,7 @@ def search_one(origin, destination, departure, advp, scope, api_choice="automati
                 # A valid empty answer should not spend more accounts.
                 return [], None
             return normalize(data, origin, destination, departure, advp, scope,
-                             f'{api["id"]} · {api["provider"]}'), None
+                             api["id"]), None
         except RuntimeError as exc:
             errors.append(f'{api["id"]}: {exc}')
     return [], "Nenhuma API retornou esta busca. " + "; ".join(errors)
@@ -439,47 +438,201 @@ def parse_fee(value, label, line_number):
         raise ValueError(f"{label.title()} inválida na linha {line_number}. Use valor em BRL, por exemplo 33,44.") from exc
 
 
+def compute_comparisons(rows):
+    """Calcula comparações par a par entre cias no mesmo trecho e data."""
+    comparisons = []
+    groups = {}
+    for r in rows:
+        key = (r.get("advp"), r.get("data"), r.get("origem"), r.get("destino"), r.get("trecho"))
+        groups.setdefault(key, []).append(r)
+
+    for (advp, dep_date, orig, dest, trecho), items in groups.items():
+        if len(items) < 2:
+            continue
+        for i in range(len(items)):
+            for j in range(i + 1, len(items)):
+                a, b = items[i], items[j]
+                cia_a, cia_b = a.get("cia"), b.get("cia")
+                net_a = float(a.get("tarifa_net") or a.get("preco_total") or 0.0)
+                net_b = float(b.get("tarifa_net") or b.get("preco_total") or 0.0)
+                tot_a = float(a.get("preco_total") or 0.0)
+                tot_b = float(b.get("preco_total") or 0.0)
+
+                dif_net = round(((net_a - net_b) / net_b) * 100, 2) if net_b > 0 else None
+                dif_tot = round(((tot_a - tot_b) / tot_b) * 100, 2) if tot_b > 0 else None
+
+                def format_resumo(c1, c2, diff):
+                    if diff is None:
+                        return "—"
+                    if diff == 0:
+                        return f"{c1} com mesmo valor de {c2}"
+                    if diff < 0:
+                        return f"{c1} {abs(diff):.1f}% menor que {c2}"
+                    return f"{c1} {diff:.1f}% maior que {c2}"
+
+                comparisons.append({
+                    "advp": advp,
+                    "data": dep_date,
+                    "origem": orig,
+                    "destino": dest,
+                    "trecho": trecho or f"{orig} → {dest}",
+                    "cia_a": cia_a,
+                    "cia_b": cia_b,
+                    "net_a": net_a,
+                    "net_b": net_b,
+                    "dif_net": dif_net,
+                    "resumo_net": format_resumo(cia_a, cia_b, dif_net),
+                    "tot_a": tot_a,
+                    "tot_b": tot_b,
+                    "dif_total": dif_tot,
+                    "resumo_total": format_resumo(cia_a, cia_b, dif_tot)
+                })
+    return comparisons
+
+
 def make_xlsx(rows, example=False):
     wb = Workbook()
     ws = wb.active
-    ws.title = "Exemplo" if example else "Tarifas"
-    headers = ["origem", "destino", "taxa latam", "taxa gol", "taxa azul"] if example else [
-        "ADVP", "Data da viagem", "Origem", "Destino", "Cia", "Número do voo",
-        "Hora do voo", "Trecho", "Tarifa consultada: total (BRL)",
-        "Taxa (BRL)", "Tarifa net (BRL)", "Total sem centavos", "Classe", "Fonte"]
-    ws.append(headers)
     if example:
+        ws.title = "Exemplo"
+        ws.append(["origem", "destino", "taxa latam", "taxa gol", "taxa azul"])
         ws.append(["CGB", "GRU", 0, 0, 0])
         ws.append(["GRU", "GIG", None, None, None])
+        sheets = [ws]
     else:
+        wb.remove(ws)
+        days = {}
         for row in rows:
-            legacy = "preco_total" not in row
-            values = [row.get(k) for k in ("advp", "data", "origem", "destino",
-                     "cia", "voo", "hora", "trecho")]
-            total = row.get("preco_total", row.get("tarifa"))
-            fee = row.get("taxa_embarque", 0)
-            net = row.get("tarifa_net")
-            if net is None and isinstance(total, (int, float)):
-                net = round(float(total) - float(fee), 2)
-            values.extend([total, fee, net,
-                           "Sim" if row.get("total_aproximado", legacy) else "Não",
-                           row.get("classe"), row.get("fonte")])
-            ws.append([value if value is not None else "Não informado" for value in values])
-    for cell in ws[1]:
-        cell.fill = PatternFill("solid", fgColor="087CBC")
-        cell.font = Font(color="FFFFFF", bold=True)
-        cell.alignment = Alignment(horizontal="center")
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
-    for col in ws.columns:
-        letter = col[0].column_letter
-        ws.column_dimensions[letter].width = min(38, max(13, max(len(str(c.value or "")) for c in col) + 3))
-    if not example:
-        for letter in ("I", "J", "K"):
-            for cell in ws[letter][1:]:
-                if isinstance(cell.value, (int, float)):
-                    cell.number_format = '"R$" #,##0.00'
-    else:
+            day = (row.get("advp"), row.get("data"))
+            days.setdefault(day, {}).setdefault((row.get("origem"), row.get("destino")), []).append(row)
+        if not days:
+            days[(None, None)] = {}
+        for (advp, departure), routes in days.items():
+            title = f"{advp} dias" if advp is not None else "Tarifas"
+            if title in wb.sheetnames:
+                title = f"{title} {len(wb.sheetnames) + 1}"
+            ws = wb.create_sheet(title)
+            ws.append([f"Pesquisa: {advp} dias · {departure}" if departure else "Resultados da pesquisa"])
+            ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=14)
+            ws["A1"].font = Font(color="FFFFFF", bold=True, size=14)
+            ws["A1"].fill = PatternFill("solid", fgColor="087CBC")
+            ws.append(["Share = tarifa da companhia ÷ soma das tarifas das companhias exibidas no mesmo trecho e dia."])
+            ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=14)
+            for (origin, destination), route_rows in routes.items():
+                ws.append([])
+                ws.append([f"{origin} → {destination}"])
+                section_row = ws.max_row
+                ws.merge_cells(start_row=section_row, start_column=1, end_row=section_row, end_column=14)
+                ws.cell(section_row, 1).fill = PatternFill("solid", fgColor="E8F3FA")
+                ws.cell(section_row, 1).font = Font(color="123454", bold=True)
+                ws.append(["ADVP", "Data da viagem", "Origem", "Destino", "Cia", "Número do voo",
+                           "Hora do voo", "Trecho", "Tarifa net (BRL)", "Taxa (BRL)",
+                           "Tarifa total (BRL)", "Share net", "Share total", "Fonte"])
+                header_row = ws.max_row
+                for cell in ws[header_row]:
+                    cell.fill = PatternFill("solid", fgColor="087CBC")
+                    cell.font = Font(color="FFFFFF", bold=True)
+                    cell.alignment = Alignment(horizontal="center")
+                trecho_net = 0.0
+                trecho_fee = 0.0
+                trecho_total = 0.0
+                for row in route_rows:
+                    total = row.get("preco_total", row.get("tarifa")) or 0.0
+                    fee = row.get("taxa_embarque", 0) or 0.0
+                    net = row.get("tarifa_net")
+                    if net is None and isinstance(total, (int, float)):
+                        net = round(float(total) - float(fee), 2)
+                    trecho_net += float(net or 0)
+                    trecho_fee += float(fee or 0)
+                    trecho_total += float(total or 0)
+                    ws.append([row.get("advp"), row.get("data"), row.get("origem"), row.get("destino"),
+                               row.get("cia"), row.get("voo"), row.get("hora"), row.get("trecho"),
+                               net, fee, total,
+                               row.get("share_net") / 100 if row.get("share_net") is not None else None,
+                               row.get("share_total") / 100 if row.get("share_total") is not None else None,
+                               row.get("fonte")])
+                    for col in (9, 10, 11):
+                        ws.cell(ws.max_row, col).number_format = '"R$" #,##0.00'
+                    for col in (12, 13):
+                        ws.cell(ws.max_row, col).number_format = "0.00%"
+                if len(route_rows) > 1:
+                    ws.append(["Total Trecho", "", "", "", f"{len(route_rows)} cias", "", "", "",
+                               trecho_net, trecho_fee, trecho_total, 1.0, 1.0, ""])
+                    total_row = ws.max_row
+                    for cell in ws[total_row]:
+                        cell.font = Font(bold=True)
+                        cell.fill = PatternFill("solid", fgColor="F1F5F9")
+                    for col in (9, 10, 11):
+                        ws.cell(total_row, col).number_format = '"R$" #,##0.00'
+                    for col in (12, 13):
+                        ws.cell(total_row, col).number_format = "0.00%"
+            ws.freeze_panes = "A3"
+            for index, col in enumerate(ws.columns, start=1):
+                letter = get_column_letter(index)
+                ws.column_dimensions[letter].width = min(38, max(13, max(len(str(c.value or "")) for c in col if c.value is not None) + 3))
+
+        # Aba de Comparativo Cia vs Cia
+        comparisons = compute_comparisons(rows)
+        if comparisons:
+            ws_comp = wb.create_sheet("Comparativo Cia vs Cia")
+            ws_comp.append(["Comparativo Cia vs Cia · Diferença percentual de tarifas no mesmo trecho"])
+            ws_comp.merge_cells(start_row=1, start_column=1, end_row=1, end_column=13)
+            ws_comp["A1"].font = Font(color="FFFFFF", bold=True, size=13)
+            ws_comp["A1"].fill = PatternFill("solid", fgColor="0F4C81")
+
+            headers = ["ADVP", "Data da viagem", "Trecho", "Cia A", "Cia B",
+                       "Tarifa Net A (BRL)", "Tarifa Net B (BRL)", "Dif. Net (%)", "Resumo Net",
+                       "Total A (BRL)", "Total B (BRL)", "Dif. Total (%)", "Resumo Total"]
+            ws_comp.append(headers)
+            header_row = ws_comp.max_row
+            for cell in ws_comp[header_row]:
+                cell.fill = PatternFill("solid", fgColor="1E293B")
+                cell.font = Font(color="FFFFFF", bold=True)
+                cell.alignment = Alignment(horizontal="center")
+
+            for comp in comparisons:
+                advp_str = f"{comp['advp']} dias" if comp['advp'] is not None else "—"
+                ws_comp.append([
+                    advp_str, comp["data"], comp["trecho"],
+                    comp["cia_a"], comp["cia_b"],
+                    comp["net_a"], comp["net_b"],
+                    comp["dif_net"] / 100 if comp["dif_net"] is not None else None,
+                    comp["resumo_net"],
+                    comp["tot_a"], comp["tot_b"],
+                    comp["dif_total"] / 100 if comp["dif_total"] is not None else None,
+                    comp["resumo_total"]
+                ])
+                curr_row = ws_comp.max_row
+                ws_comp.cell(curr_row, 6).number_format = '"R$" #,##0.00'
+                ws_comp.cell(curr_row, 7).number_format = '"R$" #,##0.00'
+                ws_comp.cell(curr_row, 8).number_format = '+0.00%;-0.00%;0.00%'
+                ws_comp.cell(curr_row, 10).number_format = '"R$" #,##0.00'
+                ws_comp.cell(curr_row, 11).number_format = '"R$" #,##0.00'
+                ws_comp.cell(curr_row, 12).number_format = '+0.00%;-0.00%;0.00%'
+
+                if comp["dif_net"] is not None:
+                    color = "047857" if comp["dif_net"] < 0 else "B91C1C"
+                    ws_comp.cell(curr_row, 8).font = Font(color=color, bold=True)
+                    ws_comp.cell(curr_row, 9).font = Font(color=color, bold=True)
+                if comp["dif_total"] is not None:
+                    color = "047857" if comp["dif_total"] < 0 else "B91C1C"
+                    ws_comp.cell(curr_row, 12).font = Font(color=color, bold=True)
+                    ws_comp.cell(curr_row, 13).font = Font(color=color, bold=True)
+
+            ws_comp.freeze_panes = "A3"
+            for index, col in enumerate(ws_comp.columns, start=1):
+                letter = get_column_letter(index)
+                ws_comp.column_dimensions[letter].width = min(38, max(13, max(len(str(c.value or "")) for c in col if c.value is not None) + 3))
+
+        sheets = wb.worksheets
+    if example:
+        for cell in ws[1]:
+            cell.fill = PatternFill("solid", fgColor="087CBC")
+            cell.font = Font(color="FFFFFF", bold=True)
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+        for letter in ("A", "B", "C", "D", "E"):
+            ws.column_dimensions[letter].width = 18
         for letter in ("C", "D", "E"):
             for cell in ws[letter][1:]:
                 if isinstance(cell.value, (int, float)):
@@ -544,7 +697,12 @@ def api_search():
             destination = request.form.get("destination", "").strip().upper()
             if not valid_iata(origin) or not valid_iata(destination) or origin == destination:
                 raise ValueError("Informe origem e destino com códigos IATA de 3 letras diferentes.")
-            routes = [{"origin": origin, "destination": destination, "fees": {}}]
+            fees = {}
+            for label, cia in (("fee_latam", "LATAM"), ("fee_gol", "GOL"), ("fee_azul", "Azul")):
+                val = request.form.get(label)
+                if val:
+                    fees[cia] = parse_fee(val, f"Taxa {cia}", 1)
+            routes = [{"origin": origin, "destination": destination, "fees": fees}]
         if mode == "data_especifica":
             departure_text = request.form.get("departure_date", "").strip()
             if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", departure_text):
@@ -568,9 +726,22 @@ def api_search():
             found, error = search_one(origin, destination, departure, advp, scope, api_choice)
             for row in found:
                 fee = route["fees"].get(row["cia"], Decimal("0.00"))
+                if fee == Decimal("0.00") and row.get("taxa") is not None:
+                    try:
+                        fee = Decimal(str(row["taxa"])).quantize(Decimal("0.01"))
+                    except (InvalidOperation, ValueError):
+                        fee = Decimal("0.00")
                 total = Decimal(str(row["preco_total"]))
+                net = max(Decimal("0.00"), total - fee)
                 row["taxa_embarque"] = float(fee)
-                row["tarifa_net"] = float((total - fee).quantize(Decimal("0.01")))
+                row["tarifa_net"] = float(net.quantize(Decimal("0.01")))
+            sum_total = sum((Decimal(str(row["preco_total"])) for row in found), Decimal("0"))
+            sum_net = sum((Decimal(str(row["tarifa_net"])) for row in found), Decimal("0"))
+            for row in found:
+                row["share_total"] = (float((Decimal(str(row["preco_total"])) * 100 / sum_total).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP)) if sum_total else None)
+                row["share_net"] = (float((Decimal(str(row["tarifa_net"])) * 100 / sum_net).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP)) if sum_net else None)
             rows.extend(found)
             if error:
                 errors.append(f"{origin} → {destination}, {advp} dias: {error}")
@@ -579,7 +750,8 @@ def api_search():
         db.execute("INSERT INTO exports (token, rows_json) VALUES (?, ?)",
                    (token, json.dumps(rows, ensure_ascii=False)))
         db.commit()
-    return jsonify(rows=rows, errors=errors, token=token, routes=len(routes),
+    comparisons = compute_comparisons(rows)
+    return jsonify(rows=rows, comparisons=comparisons, errors=errors, token=token, routes=len(routes),
                    searches=len(routes) * len(departures))
 
 

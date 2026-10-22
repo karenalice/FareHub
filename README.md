@@ -21,6 +21,18 @@ Na pesquisa em lote, as colunas opcionais `taxa latam`, `taxa gol` e `taxa azul`
 recebem a taxa de embarque em BRL para cada companhia naquele trecho. Coluna
 ausente ou célula vazia vale R$ 0,00. O XLSX exportado inclui **Taxa (BRL)** e
 **Tarifa net (BRL)**, calculada como total retornado pela API menos essa taxa.
+Esses valores também aparecem nos resultados da página. O **share total** é a
+tarifa total da menor opção de uma companhia dividida pela soma das tarifas
+totais das companhias exibidas no mesmo trecho e dia. O **share net** usa o
+mesmo cálculo com as tarifas net. Os percentuais refletem as opções da pesquisa,
+não participação de mercado. O arquivo exportado separa os dias em abas e,
+dentro de cada aba, agrupa os resultados por trecho com os dois shares.
+
+O sistema também inclui o painel **Comparativo Cia vs Cia**, calculando a diferença
+percentual direta entre companhias que operam o mesmo trecho na mesma data
+(ex: LATAM 15,2% menor que GOL, LATAM 8,5% maior que Azul), tanto para tarifas Net
+quanto para tarifas Totais. Essa análise também é gerada em aba dedicada no Excel
+(`Comparativo Cia vs Cia`), com formatação condicional e percentuais com sinal (+/-).
 
 ## Fontes e cotas
 
