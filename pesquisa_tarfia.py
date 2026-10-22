@@ -32,25 +32,107 @@ app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 
-def configured_apis():
-    """Read repeated .env keys by section; ordinary dotenv loaders lose duplicates."""
-    accounts = []
-    account = None
-    if not (ROOT / ".env").exists():
-        return accounts
-    for raw in (ROOT / ".env").read_text(encoding="utf-8-sig").splitlines():
+def load_env_file():
+    """Load .env file into os.environ if present, without overriding existing vars."""
+    env_file = ROOT / ".env"
+    if not env_file.exists():
+        return
+    for raw in env_file.read_text(encoding="utf-8-sig").splitlines():
         line = raw.strip()
-        if line.upper().startswith("#CHAVE API'S EMAIL"):
-            account = line.split("EMAIL", 1)[1].strip()
-        elif line.startswith("#CHAVE API'S"):
-            account = line.removeprefix("#CHAVE API'S").strip()
-        elif "=" in line and not line.startswith("#"):
-            key, value = line.split("=", 1)
-            key, value = key.strip(), value.strip().strip('"\'')
-            if key in ("CHAVE_API_SERPAPI", "CHAVE_API_RAPIDAPI") and value:
-                provider = "SerpApi" if key.endswith("SERPAPI") else "RapidAPI"
-                accounts.append({"id": f"API {len(accounts) + 1}", "provider": provider,
-                                 "account": account or "Conta não identificada", "key": value})
+        if "=" in line and not line.startswith("#"):
+            k, v = line.split("=", 1)
+            k, v = k.strip(), v.strip().strip('"\'')
+            if k and k not in os.environ:
+                os.environ[k] = v
+
+
+def configured_apis():
+    """Detect and return distinct, named APIs from environment variables and .env."""
+    load_env_file()
+    accounts = []
+    seen_keys = set()
+
+    # 1. Chaves enumeradas SerpApi (SERPAPI_KEY_1, SERPAPI_KEY_2...)
+    serp_indices = sorted({
+        int(m.group(1)) for k in os.environ
+        if (m := re.match(r"^SERPAPI_KEY_(\d+)$", k, re.IGNORECASE))
+    })
+    for idx in serp_indices:
+        key = os.environ.get(f"SERPAPI_KEY_{idx}", "").strip()
+        name = os.environ.get(f"SERPAPI_NAME_{idx}", "").strip() or f"Conta {idx}"
+        if key and key not in seen_keys:
+            seen_keys.add(key)
+            accounts.append({
+                "id": f"SerpApi {idx} ({name})",
+                "provider": "SerpApi",
+                "account": name,
+                "key": key
+            })
+
+    # 2. Chaves enumeradas RapidAPI (RAPIDAPI_KEY_1, RAPIDAPI_KEY_2...)
+    rapid_indices = sorted({
+        int(m.group(1)) for k in os.environ
+        if (m := re.match(r"^RAPIDAPI_KEY_(\d+)$", k, re.IGNORECASE))
+    })
+    for idx in rapid_indices:
+        key = os.environ.get(f"RAPIDAPI_KEY_{idx}", "").strip()
+        name = os.environ.get(f"RAPIDAPI_NAME_{idx}", "").strip() or f"Conta {idx}"
+        if key and key not in seen_keys:
+            seen_keys.add(key)
+            accounts.append({
+                "id": f"RapidAPI {idx} ({name})",
+                "provider": "RapidAPI",
+                "account": name,
+                "key": key
+            })
+
+    # 3. Chaves únicas simples (fallback)
+    for key_name in ("SERPAPI_KEY", "CHAVE_API_SERPAPI"):
+        val = os.environ.get(key_name, "").strip()
+        if val and val not in seen_keys:
+            seen_keys.add(val)
+            accounts.append({
+                "id": "SerpApi Principal",
+                "provider": "SerpApi",
+                "account": "Principal",
+                "key": val
+            })
+            break
+
+    for key_name in ("RAPIDAPI_KEY", "CHAVE_API_RAPIDAPI"):
+        val = os.environ.get(key_name, "").strip()
+        if val and val not in seen_keys:
+            seen_keys.add(val)
+            accounts.append({
+                "id": "RapidAPI Principal",
+                "provider": "RapidAPI",
+                "account": "Principal",
+                "key": val
+            })
+            break
+
+    # 4. Formato legado do .env por seções
+    if not accounts and (ROOT / ".env").exists():
+        account = None
+        for raw in (ROOT / ".env").read_text(encoding="utf-8-sig").splitlines():
+            line = raw.strip()
+            if line.upper().startswith("#CHAVE API'S EMAIL"):
+                account = line.split("EMAIL", 1)[1].strip()
+            elif line.startswith("#CHAVE API'S"):
+                account = line.removeprefix("#CHAVE API'S").strip()
+            elif "=" in line and not line.startswith("#"):
+                key, value = line.split("=", 1)
+                key, value = key.strip(), value.strip().strip('"\'')
+                if key in ("CHAVE_API_SERPAPI", "CHAVE_API_RAPIDAPI") and value and value not in seen_keys:
+                    seen_keys.add(value)
+                    provider = "SerpApi" if key.endswith("SERPAPI") else "RapidAPI"
+                    accounts.append({
+                        "id": f"{provider} {len(accounts) + 1} ({account or 'Conta'})",
+                        "provider": provider,
+                        "account": account or "Conta",
+                        "key": value
+                    })
+
     return accounts
 
 
