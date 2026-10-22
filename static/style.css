@@ -324,9 +324,22 @@ html, body {
 /* 3.3 Planilha em Lote */
 .sheet-group {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 10px;
   flex: 1 1 360px;
+}
+
+.sheet-fee-note {
+  flex: 1 1 100%;
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  color: var(--text-main);
+  background: #eff8fc;
+  border: 1px solid #cfe6f1;
+  border-radius: var(--radius);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .file-block {

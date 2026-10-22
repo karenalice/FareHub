@@ -17,6 +17,10 @@ python pesquisa_tarfia.py
 
 Abra <http://127.0.0.1:8502>. A planilha de exemplo está no botão **Baixar exemplo
 de Excel**. Use códigos IATA de três letras nas colunas `origem` e `destino`.
+Na pesquisa em lote, as colunas opcionais `taxa latam`, `taxa gol` e `taxa azul`
+recebem a taxa de embarque em BRL para cada companhia naquele trecho. Coluna
+ausente ou célula vazia vale R$ 0,00. O XLSX exportado inclui **Taxa (BRL)** e
+**Tarifa net (BRL)**, calculada como total retornado pela API menos essa taxa.
 
 ## Fontes e cotas
 
@@ -42,6 +46,7 @@ do `.env` não identifica o serviço contratado.
 Preços são valores totais para uma pessoa, só ida, em BRL. A SerpApi e a
 RapidAPI DataCrawler retornaram `price` como inteiro nas buscas testadas. Os
 detalhes de reserva da RapidAPI trouxeram preços por vendedor, mas não tarifa
-base, impostos ou desconto separados. Por isso a tela e o XLSX mostram uma
-única coluna **Tarifa consultada (total)**. O valor exato e seus componentes
+base, impostos ou desconto separados. Por isso a tela mostra a **Tarifa Total**
+retornada pela API. As taxas da planilha são valores informados pelo usuário,
+separados de qualquer detalhamento da API. O valor exato e seus componentes
 precisam ser confirmados no checkout da companhia.

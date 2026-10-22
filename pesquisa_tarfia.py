@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import json
@@ -24,6 +25,7 @@ DB_PATH = ROOT / "farehub.sqlite3"
 ADVPS = (7, 30, 60)
 MONTHLY_LIMITS = {"SerpApi": 250, "RapidAPI": 150}
 NATIONAL = {"LATAM": "LATAM", "GOL": "GOL", "AZUL": "Azul"}
+FEE_COLUMNS = {"taxa latam": "LATAM", "taxa gol": "GOL", "taxa azul": "Azul"}
 SESSION = requests.Session()
 LOCK = threading.Lock()
 app = Flask(__name__)
@@ -381,25 +383,37 @@ def parse_routes(file):
         workbook = load_workbook(file.stream, read_only=True, data_only=True)
         sheet = workbook.active
         iterator = sheet.iter_rows(values_only=True)
-        header = [str(v or "").strip().lower() for v in next(iterator)]
+        header = [re.sub(r"[\s_]+", " ", str(v or "").strip().casefold())
+                  for v in next(iterator)]
         if "origem" not in header or "destino" not in header:
             raise ValueError("A primeira linha deve conter as colunas origem e destino.")
         ix_o, ix_d = header.index("origem"), header.index("destino")
+        fee_indexes = {airline: header.index(label) if label in header else None
+                       for label, airline in FEE_COLUMNS.items()}
         routes = []
-        for row in iterator:
+        for line_number, row in enumerate(iterator, start=2):
             if not any(v is not None and str(v).strip() for v in row):
                 continue
             origin = str(row[ix_o] or "").strip().upper() if ix_o < len(row) else ""
             dest = str(row[ix_d] or "").strip().upper() if ix_d < len(row) else ""
             if not valid_iata(origin) or not valid_iata(dest) or origin == dest:
-                raise ValueError(f"Trecho inválido na linha {len(routes) + 2}. Use códigos IATA de 3 letras.")
-            routes.append((origin, dest))
+                raise ValueError(f"Trecho inválido na linha {line_number}. Use códigos IATA de 3 letras.")
+            fees = {airline: parse_fee(row[index] if index is not None and index < len(row) else None,
+                                       label, line_number)
+                    for label, airline in FEE_COLUMNS.items()
+                    for index in [fee_indexes[airline]]}
+            routes.append({"origin": origin, "destination": dest, "fees": fees})
             if len(routes) > 10:
                 raise ValueError("A planilha aceita até 10 trechos.")
         workbook.close()
         if not routes:
             raise ValueError("A planilha não contém trechos.")
-        return list(dict.fromkeys(routes))
+        unique = {}
+        for route in routes:
+            key = (route["origin"], route["destination"],
+                   *(route["fees"][airline] for airline in FEE_COLUMNS.values()))
+            unique.setdefault(key, route)
+        return list(unique.values())
     except ValueError:
         raise
     except Exception as exc:
@@ -410,24 +424,44 @@ def valid_iata(value):
     return bool(re.fullmatch(r"[A-Z]{3}", value))
 
 
+def parse_fee(value, label, line_number):
+    if value is None or isinstance(value, str) and not value.strip():
+        return Decimal("0.00")
+    try:
+        text = str(value).strip().replace("R$", "").replace(" ", "")
+        if "," in text:
+            text = text.replace(".", "").replace(",", ".")
+        amount = Decimal(text)
+        if not amount.is_finite() or amount < 0 or amount.as_tuple().exponent < -2:
+            raise InvalidOperation
+        return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{label.title()} inválida na linha {line_number}. Use valor em BRL, por exemplo 33,44.") from exc
+
+
 def make_xlsx(rows, example=False):
     wb = Workbook()
     ws = wb.active
     ws.title = "Exemplo" if example else "Tarifas"
-    headers = ["origem", "destino"] if example else [
+    headers = ["origem", "destino", "taxa latam", "taxa gol", "taxa azul"] if example else [
         "ADVP", "Data da viagem", "Origem", "Destino", "Cia", "Número do voo",
         "Hora do voo", "Trecho", "Tarifa consultada: total (BRL)",
-        "Total sem centavos", "Classe", "Fonte"]
+        "Taxa (BRL)", "Tarifa net (BRL)", "Total sem centavos", "Classe", "Fonte"]
     ws.append(headers)
     if example:
-        ws.append(["CGB", "GRU"])
-        ws.append(["GRU", "GIG"])
+        ws.append(["CGB", "GRU", 0, 0, 0])
+        ws.append(["GRU", "GIG", None, None, None])
     else:
         for row in rows:
             legacy = "preco_total" not in row
             values = [row.get(k) for k in ("advp", "data", "origem", "destino",
                      "cia", "voo", "hora", "trecho")]
-            values.extend([row.get("preco_total", row.get("tarifa")),
+            total = row.get("preco_total", row.get("tarifa"))
+            fee = row.get("taxa_embarque", 0)
+            net = row.get("tarifa_net")
+            if net is None and isinstance(total, (int, float)):
+                net = round(float(total) - float(fee), 2)
+            values.extend([total, fee, net,
                            "Sim" if row.get("total_aproximado", legacy) else "Não",
                            row.get("classe"), row.get("fonte")])
             ws.append([value if value is not None else "Não informado" for value in values])
@@ -441,7 +475,12 @@ def make_xlsx(rows, example=False):
         letter = col[0].column_letter
         ws.column_dimensions[letter].width = min(38, max(13, max(len(str(c.value or "")) for c in col) + 3))
     if not example:
-        for letter in ("I",):
+        for letter in ("I", "J", "K"):
+            for cell in ws[letter][1:]:
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = '"R$" #,##0.00'
+    else:
+        for letter in ("C", "D", "E"):
             for cell in ws[letter][1:]:
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = '"R$" #,##0.00'
@@ -505,7 +544,7 @@ def api_search():
             destination = request.form.get("destination", "").strip().upper()
             if not valid_iata(origin) or not valid_iata(destination) or origin == destination:
                 raise ValueError("Informe origem e destino com códigos IATA de 3 letras diferentes.")
-            routes = [(origin, destination)]
+            routes = [{"origin": origin, "destination": destination, "fees": {}}]
         if mode == "data_especifica":
             departure_text = request.form.get("departure_date", "").strip()
             if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", departure_text):
@@ -523,9 +562,15 @@ def api_search():
                   if mode == "data_especifica" else
                   [((today + timedelta(days=advp)).isoformat(), advp)
                    for advp in ADVPS])
-    for origin, destination in routes:
+    for route in routes:
+        origin, destination = route["origin"], route["destination"]
         for departure, advp in departures:
             found, error = search_one(origin, destination, departure, advp, scope, api_choice)
+            for row in found:
+                fee = route["fees"].get(row["cia"], Decimal("0.00"))
+                total = Decimal(str(row["preco_total"]))
+                row["taxa_embarque"] = float(fee)
+                row["tarifa_net"] = float((total - fee).quantize(Decimal("0.01")))
             rows.extend(found)
             if error:
                 errors.append(f"{origin} → {destination}, {advp} dias: {error}")
