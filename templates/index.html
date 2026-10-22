@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FareHub · Tarifas Aéreas</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <!-- Cabeçalho Principal (Largura total, Esquerda: Logo/Nome, Centro: Menu, Direita: Requisições/Data) -->
+  <header class="app-header">
+    <div class="header-container">
+      <!-- Esquerda: Marca -->
+      <div class="brand">
+        <img class="brand-logo" src="{{ url_for('static', filename='logo.png') }}" alt="FareHub">
+        <span class="brand-name">FareHub</span>
+      </div>
+
+      <!-- Centro: Menu de Modos -->
+      <nav class="nav-modes" aria-label="Modo de consulta">
+        <button type="button" id="tab-single" class="mode-btn active">Trecho</button>
+        <button type="button" id="tab-date" class="mode-btn">Data específica</button>
+        <button type="button" id="tab-sheet" class="mode-btn">Planilha em lote</button>
+        <button type="button" id="tab-usage" class="mode-btn">Consumo APIs</button>
+      </nav>
+
+      <!-- Direita: Total de Requisições Disponíveis + Data Atual -->
+      <div class="header-meta">
+        <span class="meta-requests" id="meta-requests">— requisições disponíveis</span>
+        <span class="meta-sep">|</span>
+        <span class="meta-date" id="meta-date">{{ today }}</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Área Principal (Largura Total da Página) -->
+  <main class="app-main">
+    <!-- Barra de Pesquisa -->
+    <section class="search-panel" id="search-panel">
+      <form id="search-form" enctype="multipart/form-data">
+        <input type="hidden" name="mode" id="mode" value="single">
+
+        <div class="search-bar">
+          <!-- Trecho Individual: Origem e Destino -->
+          <div id="single-fields" class="route-group">
+            <div class="input-block">
+              <label for="origin">Origem</label>
+              <div class="input-wrap">
+                <input id="origin" name="origin" maxlength="3" pattern="[A-Za-z]{3}" placeholder="CGB" autocomplete="off" spellcheck="false">
+                <span class="badge-iata">IATA</span>
+              </div>
+            </div>
+
+            <button type="button" id="swap-route" class="btn-swap" title="Inverter origem e destino" aria-label="Inverter origem e destino">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4M7 4L3 8M7 4L11 8M17 8V20M17 20L21 16M17 20L13 16"/></svg>
+            </button>
+
+            <div class="input-block">
+              <label for="destination">Destino</label>
+              <div class="input-wrap">
+                <input id="destination" name="destination" maxlength="3" pattern="[A-Za-z]{3}" placeholder="GRU" autocomplete="off" spellcheck="false">
+                <span class="badge-iata">IATA</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Data Específica -->
+          <div id="date-fields" class="input-block date-block" hidden>
+            <label for="departure-date">Data de embarque</label>
+            <input id="departure-date" type="date" name="departure_date" min="{{ today }}">
+          </div>
+
+          <!-- Planilha em Lote -->
+          <div id="sheet-fields" class="sheet-group" hidden>
+            <div class="input-block file-block">
+              <label for="file">Arquivo de trechos (.xlsx)</label>
+              <input id="file" type="file" name="file" accept=".xlsx">
+            </div>
+            <a class="btn-link-sample" href="/exemplo.xlsx" download>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Baixar planilha modelo
+            </a>
+          </div>
+
+          <!-- Filtro de Companhias -->
+          <div class="input-block select-block">
+            <label for="scope-single">Companhias</label>
+            <select id="scope-single" name="scope">
+              <option value="nacional">Nacionais (LATAM, GOL, Azul)</option>
+              <option value="internacional">Todas as companhias</option>
+            </select>
+            <select id="scope-sheet" hidden disabled>
+              <option value="nacional">Nacionais (LATAM, GOL, Azul)</option>
+              <option value="internacional">Todas as companhias</option>
+            </select>
+          </div>
+
+          <!-- Seleção de API -->
+          <div class="input-block select-block">
+            <label for="api-choice">API</label>
+            <select id="api-choice" name="api_choice">
+              <option value="automatico">Automático (SerpApi / RapidAPI)</option>
+              {% for api in apis %}
+              <option value="{{ api.id }}">{{ api.id }} ({{ api.provider }})</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- Botão Pesquisar -->
+          <div class="submit-block">
+            <button class="btn-submit" id="submit" type="submit">
+              <span class="btn-spinner" id="spinner" hidden></span>
+              <span id="submit-text">Pesquisar</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Barra de Progresso durante a busca -->
+        <div id="search-status-bar" class="search-status-bar" hidden>
+          <span class="status-pulse"></span>
+          <span id="search-status-text">Consultando tarifas nas companhias...</span>
+        </div>
+
+        <div id="search-error" class="alert-error" hidden></div>
+      </form>
+    </section>
+
+    <!-- Painel de Resultados (100% da largura) -->
+    <section class="results-panel" id="results-panel">
+      <div class="panel-header">
+        <div class="panel-title-area">
+          <h2>Resultados</h2>
+          <span id="result-summary" class="result-summary-badge" hidden>0 voos</span>
+        </div>
+
+        <div class="panel-actions">
+          <div class="airline-filters" id="airline-filters" hidden>
+            <button type="button" class="filter-chip active" data-filter="all">Todas</button>
+            <button type="button" class="filter-chip" data-filter="LATAM">LATAM</button>
+            <button type="button" class="filter-chip" data-filter="GOL">GOL</button>
+            <button type="button" class="filter-chip" data-filter="Azul">Azul</button>
+          </div>
+
+          <a id="export" class="btn-export" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Exportar XLSX
+          </a>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table class="data-table" id="results-table">
+          <thead>
+            <tr>
+              <th>ADVP / Data</th>
+              <th>Cia</th>
+              <th>Voo</th>
+              <th>Horário</th>
+              <th>Trecho</th>
+              <th>Tarifa Total</th>
+              <th>Classe</th>
+              <th>Fonte</th>
+            </tr>
+          </thead>
+          <tbody id="results">
+            <tr class="empty-row">
+              <td colspan="8">Informe os dados acima e clique em Pesquisar</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Painel de Consumo das APIs (100% da largura) -->
+    <section class="usage-panel" id="usage-panel" hidden>
+      <div class="panel-header">
+        <div class="panel-title-area">
+          <h2>Monitoramento de Consumo</h2>
+        </div>
+        <div class="panel-actions">
+          <button type="button" class="btn-secondary" id="refresh">Atualizar</button>
+          <button type="button" class="btn-primary-sm" id="refresh-rapid">Consultar Saldo RapidAPI</button>
+        </div>
+      </div>
+
+      <div id="rapid-status" class="status-msg" hidden></div>
+
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>API</th>
+              <th>Provedor</th>
+              <th>Usadas no Mês</th>
+              <th>Restantes</th>
+              <th>Cota Mensal</th>
+              <th>Uso %</th>
+              <th>Chamadas</th>
+              <th>Consumidas</th>
+            </tr>
+          </thead>
+          <tbody id="usage">
+            <tr class="empty-row"><td colspan="8">Carregando consumo...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    let currentRows = [];
+    let currentFilter = 'all';
+
+    // Formatar data no padrão brasileiro DD/MM/AAAA
+    (function formatHeaderDate() {
+      const raw = $('meta-date').textContent.trim();
+      if (raw && raw.includes('-')) {
+        const p = raw.split('-');
+        if (p.length === 3) {
+          $('meta-date').textContent = `${p[2]}/${p[1]}/${p[0]}`;
+        }
+      }
+    })();
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    function fmt(v) {
+      return v === null || v === undefined ? '—' : Number(v).toLocaleString('pt-BR');
+    }
+
+    function money(v) {
+      if (v === null || v === undefined) return 'Não informado';
+      return Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+
+    // Auto-uppercase nos campos IATA e avanço automático de foco
+    ['origin', 'destination'].forEach(id => {
+      const el = $(id);
+      if (!el) return;
+      el.addEventListener('input', () => {
+        el.value = el.value.toUpperCase().replace(/[^A-Z]/g, '');
+        if (id === 'origin' && el.value.length === 3) {
+          $('destination').focus();
+        }
+      });
+    });
+
+    // Inverter origem e destino
+    $('swap-route').addEventListener('click', () => {
+      const orig = $('origin').value;
+      $('origin').value = $('destination').value;
+      $('destination').value = orig;
+    });
+
+    // Atualizar no cabeçalho o total de requisições que podem ser feitas
+    function updateAvailableRequests(data) {
+      if (!Array.isArray(data)) return;
+      let totalRemaining = 0;
+      data.forEach(x => {
+        if (x.remaining !== null && x.remaining !== undefined) {
+          totalRemaining += Number(x.remaining);
+        } else if (x.limit) {
+          const used = Number(x.consumed || 0);
+          totalRemaining += Math.max(0, Number(x.limit) - used);
+        }
+      });
+      $('meta-requests').innerHTML = `<strong>${totalRemaining.toLocaleString('pt-BR')}</strong> requisições disponíveis`;
+    }
+
+    // Alternador de Modos
+    function setMode(mode) {
+      const isSheet = mode === 'planilha';
+      const isUsage = mode === 'consumo';
+      const isDate = mode === 'data_especifica';
+
+      $('mode').value = mode;
+
+      $('search-panel').hidden = isUsage;
+      $('results-panel').hidden = isUsage;
+      $('usage-panel').hidden = !isUsage;
+
+      $('single-fields').hidden = isSheet;
+      $('date-fields').hidden = !isDate;
+      $('sheet-fields').hidden = !isSheet;
+
+      $('tab-single').classList.toggle('active', mode === 'single');
+      $('tab-date').classList.toggle('active', isDate);
+      $('tab-sheet').classList.toggle('active', isSheet);
+      $('tab-usage').classList.toggle('active', isUsage);
+
+      $('scope-single').hidden = isSheet;
+      $('scope-single').disabled = isSheet || isUsage;
+      $('scope-sheet').hidden = !isSheet;
+      $('scope-sheet').disabled = !isSheet || isUsage;
+
+      $('file').required = isSheet;
+      $('origin').required = !isSheet && !isUsage;
+      $('destination').required = !isSheet && !isUsage;
+      $('departure-date').required = isDate;
+
+      if (isUsage) loadUsage();
+    }
+
+    $('tab-single').onclick = () => setMode('single');
+    $('tab-date').onclick = () => setMode('data_especifica');
+    $('tab-sheet').onclick = () => setMode('planilha');
+    $('tab-usage').onclick = () => setMode('consumo');
+    setMode('single');
+
+    // Carregar Consumo e atualizar total de requisições no topo
+    async function loadUsage() {
+      try {
+        const r = await fetch('/api/usage');
+        const data = await r.json();
+        updateAvailableRequests(data);
+
+        if (!data.length) {
+          $('usage').innerHTML = '<tr class="empty-row"><td colspan="8">Nenhuma API configurada.</td></tr>';
+          return;
+        }
+
+        $('usage').innerHTML = data.map(x => {
+          let pct = 0;
+          if (x.limit && x.used !== null && x.used !== undefined) {
+            pct = Math.min(100, Math.round((x.used / x.limit) * 100));
+          } else if (x.limit && x.remaining !== null && x.remaining !== undefined) {
+            pct = Math.min(100, Math.round(((x.limit - x.remaining) / x.limit) * 100));
+          }
+          const barColor = pct > 85 ? '#dc2626' : pct > 60 ? '#d97706' : '#0284c7';
+
+          return `<tr>
+            <td><strong>${escapeHtml(x.id)}</strong></td>
+            <td>${escapeHtml(x.provider)}</td>
+            <td>${fmt(x.used)}</td>
+            <td><strong>${fmt(x.remaining)}</strong></td>
+            <td>${fmt(x.limit)}</td>
+            <td>
+              <div class="quota-meter">
+                <div class="quota-bar" style="width: ${pct}%; background: ${barColor}"></div>
+                <span>${pct}%</span>
+              </div>
+            </td>
+            <td>${fmt(x.attempts)}</td>
+            <td><strong>${fmt(x.consumed)}</strong></td>
+          </tr>`;
+        }).join('');
+      } catch (e) {
+        $('usage').innerHTML = '<tr class="empty-row"><td colspan="8">Falha ao consultar consumo.</td></tr>';
+      }
+    }
+
+    $('refresh').onclick = loadUsage;
+    loadUsage();
+
+    $('refresh-rapid').onclick = async () => {
+      const button = $('refresh-rapid');
+      button.disabled = true;
+      const statusEl = $('rapid-status');
+      statusEl.hidden = false;
+      statusEl.textContent = 'Verificando chaves RapidAPI...';
+      try {
+        const response = await fetch('/api/usage/refresh-rapid', { method: 'POST' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Falha ao consultar.');
+        await loadUsage();
+        statusEl.textContent = `${data.probed} APIs verificadas.${data.errors.length ? ' Erros: ' + data.errors.join('; ') : ''}`;
+      } catch (err) {
+        statusEl.textContent = err.message;
+      } finally {
+        button.disabled = false;
+        setTimeout(() => { statusEl.hidden = true; }, 8000);
+      }
+    };
+
+    // Renderizar tabela de resultados
+    function renderResults() {
+      const tbody = $('results');
+      if (!currentRows.length) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="8">Nenhum voo encontrado.</td></tr>';
+        return;
+      }
+
+      const rows = currentFilter === 'all' 
+        ? currentRows 
+        : currentRows.filter(r => (r.cia || '').toUpperCase().includes(currentFilter.toUpperCase()));
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr class="empty-row"><td colspan="8">Nenhum voo para a companhia ${escapeHtml(currentFilter)}.</td></tr>`;
+        return;
+      }
+
+      // Menor preço por data
+      const minByDate = {};
+      rows.forEach(r => {
+        if (!minByDate[r.data] || r.preco_total < minByDate[r.data]) {
+          minByDate[r.data] = r.preco_total;
+        }
+      });
+
+      tbody.innerHTML = rows.map(x => {
+        const isLowest = x.preco_total === minByDate[x.data];
+        const ciaUpper = (x.cia || '').toUpperCase();
+        let ciaClass = 'cia-generic';
+        if (ciaUpper.includes('LATAM')) ciaClass = 'cia-latam';
+        else if (ciaUpper.includes('GOL')) ciaClass = 'cia-gol';
+        else if (ciaUpper.includes('AZUL')) ciaClass = 'cia-azul';
+
+        const advpLabel = x.advp !== null && x.advp !== undefined ? `${x.advp}d` : '';
+
+        return `<tr>
+          <td>
+            <div class="cell-date">
+              ${advpLabel ? `<span class="badge-advp">${advpLabel}</span>` : ''}
+              <span>${escapeHtml(x.data)}</span>
+            </div>
+          </td>
+          <td><span class="badge-airline ${ciaClass}">${escapeHtml(x.cia)}</span></td>
+          <td class="cell-mono"><strong>${escapeHtml(x.voo)}</strong></td>
+          <td>${escapeHtml(x.hora)}</td>
+          <td><strong>${escapeHtml(x.trecho)}</strong></td>
+          <td class="price-cell">
+            <span class="price-val ${isLowest ? 'best-price' : ''}">${x.total_aproximado ? '≈ ' : ''}${money(x.preco_total)}</span>
+            ${isLowest ? '<span class="badge-best">Menor</span>' : ''}
+          </td>
+          <td>${escapeHtml(x.classe)}</td>
+          <td class="cell-source">${escapeHtml(x.fonte || '—')}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    // Filtros por Cia
+    document.querySelectorAll('.filter-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-chip').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentFilter = btn.dataset.filter;
+        renderResults();
+      });
+    });
+
+    // Submissão da busca
+    $('search-form').onsubmit = async e => {
+      e.preventDefault();
+      $('search-error').hidden = true;
+      $('submit').disabled = true;
+      $('spinner').hidden = false;
+      $('submit-text').textContent = 'Consultando...';
+      $('search-status-bar').hidden = false;
+      $('export').hidden = true;
+      $('airline-filters').hidden = true;
+      $('result-summary').hidden = true;
+
+      try {
+        const data = new FormData(e.target);
+        if ($('mode').value === 'planilha') {
+          data.set('scope', $('scope-sheet').value);
+        }
+
+        const r = await fetch('/api/search', { method: 'POST', body: data });
+        const result = await r.json();
+
+        if (!r.ok) throw new Error(result.error || 'Erro na pesquisa.');
+
+        currentRows = result.rows || [];
+        currentFilter = 'all';
+        document.querySelectorAll('.filter-chip').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+
+        $('result-summary').textContent = `${currentRows.length} voos (${result.searches || 1} consultas)`;
+        $('result-summary').hidden = false;
+
+        renderResults();
+
+        if (currentRows.length > 0) {
+          $('airline-filters').hidden = false;
+          $('export').href = `/export/${result.token}.xlsx`;
+          $('export').hidden = false;
+        }
+
+        if (result.errors && result.errors.length) {
+          $('search-error').textContent = result.errors.join('\n');
+          $('search-error').hidden = false;
+        }
+      } catch (err) {
+        $('search-error').textContent = err.message;
+        $('search-error').hidden = false;
+      } finally {
+        $('submit').disabled = false;
+        $('spinner').hidden = true;
+        $('submit-text').textContent = 'Pesquisar';
+        $('search-status-bar').hidden = true;
+        loadUsage();
+      }
+    };
+  </script>
+</body>
+</html>
