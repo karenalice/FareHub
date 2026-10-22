@@ -119,27 +119,6 @@
           </div>
         </div>
 
-        <!-- Taxas de Embarque Opcionais para Consulta Avulsa -->
-        <div id="fees-toggle-area" class="fees-toggle-area">
-          <button type="button" id="btn-toggle-fees" class="btn-toggle-fees">
-            <span id="fees-arrow">▸</span> Taxas de embarque (opcional)
-          </button>
-          <div id="fees-inputs" class="fees-inputs" hidden>
-            <div class="input-block fee-input">
-              <label for="fee_latam">Taxa LATAM (R$)</label>
-              <input id="fee_latam" name="fee_latam" placeholder="0,00" autocomplete="off">
-            </div>
-            <div class="input-block fee-input">
-              <label for="fee_gol">Taxa GOL (R$)</label>
-              <input id="fee_gol" name="fee_gol" placeholder="0,00" autocomplete="off">
-            </div>
-            <div class="input-block fee-input">
-              <label for="fee_azul">Taxa Azul (R$)</label>
-              <input id="fee_azul" name="fee_azul" placeholder="0,00" autocomplete="off">
-            </div>
-          </div>
-        </div>
-
         <!-- Barra de Progresso durante a busca -->
         <div id="search-status-bar" class="search-status-bar" hidden>
           <span class="status-pulse"></span>
@@ -154,7 +133,7 @@
     <section class="results-panel" id="results-panel">
       <div class="panel-header">
         <div class="panel-title-area">
-          <h2>Tarifas e Shares</h2>
+          <h2 id="results-title">Resultados da Pesquisa</h2>
           <span id="result-summary" class="result-summary-badge" hidden>0 voos</span>
         </div>
 
@@ -175,24 +154,23 @@
 
       <div class="table-container">
         <table class="data-table" id="results-table">
-          <thead>
+          <thead id="results-thead">
             <tr>
-              <th>ADVP / Data</th>
+              <th>ADVP</th>
+              <th>Data da viagem</th>
+              <th>Origem</th>
+              <th>Destino</th>
               <th>Cia</th>
-              <th>Voo</th>
-              <th>Horário</th>
+              <th>Número do voo</th>
+              <th>Hora do voo</th>
               <th>Trecho</th>
-              <th>Tarifa Net</th>
-              <th>Taxa</th>
-              <th>Tarifa Total</th>
-              <th>Share Net</th>
-              <th>Share Total</th>
+              <th>Tarifa total (BRL)</th>
               <th>Fonte</th>
             </tr>
           </thead>
           <tbody id="results">
             <tr class="empty-row">
-              <td colspan="11">Informe os dados acima e clique em Pesquisar</td>
+              <td colspan="10">Informe os dados acima e clique em Pesquisar</td>
             </tr>
           </tbody>
         </table>
@@ -429,6 +407,47 @@
     }
 
     // Alternador de Modos
+    let currentMode = 'single';
+
+    // Atualiza cabeçalhos da tabela conforme o modo (Trecho/Data Específica vs Planilha em Lote)
+    function updateTableHeaders() {
+      const thead = $('results-thead');
+      const title = $('results-title');
+      const isSheet = $('mode').value === 'planilha';
+
+      if (isSheet) {
+        title.textContent = 'Tarifas e Shares (Lote)';
+        thead.innerHTML = `<tr>
+          <th>ADVP / Data</th>
+          <th>Cia</th>
+          <th>Voo</th>
+          <th>Horário</th>
+          <th>Trecho</th>
+          <th>Tarifa Net</th>
+          <th>Taxa</th>
+          <th>Tarifa Total</th>
+          <th>Share Net</th>
+          <th>Share Total</th>
+          <th>Fonte</th>
+        </tr>`;
+      } else {
+        title.textContent = $('mode').value === 'data_especifica' ? 'Resultados (Data Específica)' : 'Resultados (Trecho)';
+        thead.innerHTML = `<tr>
+          <th>ADVP</th>
+          <th>Data da viagem</th>
+          <th>Origem</th>
+          <th>Destino</th>
+          <th>Cia</th>
+          <th>Número do voo</th>
+          <th>Hora do voo</th>
+          <th>Trecho</th>
+          <th>Tarifa total (BRL)</th>
+          <th>Fonte</th>
+        </tr>`;
+      }
+    }
+
+    // Alternador de Modos (Isolamento completo entre Trecho, Data Específica e Planilha em Lote)
     function setMode(mode) {
       const isSheet = mode === 'planilha';
       const isUsage = mode === 'consumo';
@@ -436,16 +455,30 @@
 
       $('mode').value = mode;
 
+      if (currentMode !== mode) {
+        currentMode = mode;
+        currentRows = [];
+        currentComparisons = [];
+        currentFilter = 'all';
+        updateTableHeaders();
+        const colCount = isSheet ? 11 : 10;
+        $('results').innerHTML = `<tr class="empty-row"><td colspan="${colCount}">Informe os dados acima e clique em Pesquisar</td></tr>`;
+        $('comparison-panel').hidden = true;
+        $('share-panel').hidden = true;
+        $('export').hidden = true;
+        $('airline-filters').hidden = true;
+        $('result-summary').hidden = true;
+      }
+
       $('search-panel').hidden = isUsage;
       $('results-panel').hidden = isUsage;
-      $('comparison-panel').hidden = isUsage || !currentComparisons.length;
-      $('share-panel').hidden = isUsage || !currentRows.length;
+      $('comparison-panel').hidden = !isSheet || !currentComparisons.length;
+      $('share-panel').hidden = !isSheet || !currentRows.length;
       $('usage-panel').hidden = !isUsage;
 
       $('single-fields').hidden = isSheet;
       $('date-fields').hidden = !isDate;
       $('sheet-fields').hidden = !isSheet;
-      $('fees-toggle-area').hidden = isSheet;
 
       $('tab-single').classList.toggle('active', mode === 'single');
       $('tab-date').classList.toggle('active', isDate);
@@ -470,15 +503,6 @@
     $('tab-sheet').onclick = () => setMode('planilha');
     $('tab-usage').onclick = () => setMode('consumo');
     setMode('single');
-
-    // Toggle de taxas opcionais de embarque
-    $('btn-toggle-fees').onclick = () => {
-      const inputs = $('fees-inputs');
-      const arrow = $('fees-arrow');
-      const isHidden = inputs.hidden;
-      inputs.hidden = !isHidden;
-      arrow.textContent = isHidden ? '▾' : '▸';
-    };
 
     // Modal de orientações da planilha modelo
     const sheetModal = $('modal-sheet-instructions');
@@ -565,8 +589,12 @@
     // Renderizar tabela de tarifas
     function renderResults() {
       const tbody = $('results');
+      const isSheet = $('mode').value === 'planilha';
+      const colCount = isSheet ? 11 : 10;
+      updateTableHeaders();
+
       if (!currentRows.length) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="11">Nenhum voo encontrado.</td></tr>';
+        tbody.innerHTML = `<tr class="empty-row"><td colspan="${colCount}">Nenhum voo encontrado.</td></tr>`;
         return;
       }
 
@@ -575,7 +603,7 @@
         : currentRows.filter(r => (r.cia || '').toUpperCase().includes(currentFilter.toUpperCase()));
 
       if (!rows.length) {
-        tbody.innerHTML = `<tr class="empty-row"><td colspan="11">Nenhum voo para a companhia ${escapeHtml(currentFilter)}.</td></tr>`;
+        tbody.innerHTML = `<tr class="empty-row"><td colspan="${colCount}">Nenhum voo para a companhia ${escapeHtml(currentFilter)}.</td></tr>`;
         return;
       }
 
@@ -600,6 +628,27 @@
         const feeVal = x.taxa_embarque ?? 0;
         const totalVal = x.preco_total;
 
+        if (!isSheet) {
+          // Aba Trecho ou Data Específica: isolada de planilha em lote
+          // ADVP, Data da viagem, Origem, Destino, Cia, Número do voo, Hora do voo, Trecho, Tarifa total (BRL), Fonte
+          return `<tr>
+            <td><span class="badge-advp">${advpLabel || '—'}</span></td>
+            <td class="cell-mono">${escapeHtml(x.data)}</td>
+            <td><strong>${escapeHtml(x.origem)}</strong></td>
+            <td><strong>${escapeHtml(x.destino)}</strong></td>
+            <td><span class="badge-airline ${ciaClass}">${escapeHtml(x.cia)}</span></td>
+            <td class="cell-mono"><strong>${escapeHtml(x.voo)}</strong></td>
+            <td>${escapeHtml(x.hora)}</td>
+            <td><strong>${escapeHtml(x.trecho)}</strong></td>
+            <td class="price-cell">
+              <span class="price-val ${isLowest ? 'best-price' : ''}">${x.total_aproximado ? '≈ ' : ''}${money(totalVal)}</span>
+              ${isLowest ? '<span class="badge-best">Menor</span>' : ''}
+            </td>
+            <td class="cell-source">${escapeHtml(x.fonte || '—')}</td>
+          </tr>`;
+        }
+
+        // Modo Planilha em Lote: Tarifas Net, Taxa, Total e Shares
         return `<tr>
           <td>
             <div class="cell-date">
@@ -624,11 +673,11 @@
       }).join('');
     }
 
-    // Renderizar quadro de comparativo Cia vs Cia
+    // Renderizar quadro de comparativo Cia vs Cia (apenas para modo Planilha em Lote)
     function renderComparisons() {
       const panel = $('comparison-panel');
       const tbody = $('comparisons-tbody');
-      if (!currentComparisons || !currentComparisons.length || $('mode').value === 'consumo') {
+      if ($('mode').value !== 'planilha' || !currentComparisons || !currentComparisons.length) {
         panel.hidden = true;
         tbody.innerHTML = '';
         return;
@@ -663,7 +712,7 @@
       const panel = $('share-panel');
       const groups = $('share-groups');
       const rows = currentRows.filter(r => r.share_total !== null && r.share_total !== undefined);
-      if (!rows.length || $('mode').value === 'consumo') {
+      if ($('mode').value !== 'planilha' || !rows.length) {
         panel.hidden = true;
         groups.innerHTML = '';
         return;

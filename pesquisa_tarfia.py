@@ -490,7 +490,7 @@ def compute_comparisons(rows):
     return comparisons
 
 
-def make_xlsx(rows, example=False):
+def make_xlsx(rows, mode="planilha", example=False):
     wb = Workbook()
     ws = wb.active
     if example:
@@ -499,6 +499,43 @@ def make_xlsx(rows, example=False):
         ws.append(["CGB", "GRU", 0, 0, 0])
         ws.append(["GRU", "GIG", None, None, None])
         sheets = [ws]
+    elif mode in ("single", "data_especifica", "trecho"):
+        # Aba Trecho / Data Específica: isolada de planilha em lote
+        # Apenas os resultados diretos solicitados:
+        # ADVP, Data da viagem, Origem, Destino, Cia, Número do voo, Hora do voo, Trecho, Tarifa total (BRL)
+        ws.title = "Trecho" if mode == "single" else "Data Específica"
+        headers = [
+            "ADVP", "Data da viagem", "Origem", "Destino", "Cia",
+            "Número do voo", "Hora do voo", "Trecho", "Tarifa total (BRL)"
+        ]
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.fill = PatternFill("solid", fgColor="087CBC")
+            cell.font = Font(color="FFFFFF", bold=True)
+            cell.alignment = Alignment(horizontal="center")
+
+        for row in rows:
+            total = row.get("preco_total", row.get("tarifa")) or 0.0
+            advp_val = f"{row.get('advp')} dias" if row.get("advp") is not None else "—"
+            ws.append([
+                advp_val,
+                row.get("data"),
+                row.get("origem"),
+                row.get("destino"),
+                row.get("cia"),
+                row.get("voo"),
+                row.get("hora"),
+                row.get("trecho"),
+                total
+            ])
+            ws.cell(ws.max_row, 9).number_format = '"R$" #,##0.00'
+
+        ws.freeze_panes = "A2"
+        if rows:
+            ws.auto_filter.ref = ws.dimensions
+        for index, col in enumerate(ws.columns, start=1):
+            letter = get_column_letter(index)
+            ws.column_dimensions[letter].width = min(35, max(12, max(len(str(c.value or "")) for c in col if c.value is not None) + 3))
     else:
         wb.remove(ws)
 
@@ -744,12 +781,7 @@ def api_search():
             destination = request.form.get("destination", "").strip().upper()
             if not valid_iata(origin) or not valid_iata(destination) or origin == destination:
                 raise ValueError("Informe origem e destino com códigos IATA de 3 letras diferentes.")
-            fees = {}
-            for label, cia in (("fee_latam", "LATAM"), ("fee_gol", "GOL"), ("fee_azul", "Azul")):
-                val = request.form.get(label)
-                if val:
-                    fees[cia] = parse_fee(val, f"Taxa {cia}", 1)
-            routes = [{"origin": origin, "destination": destination, "fees": fees}]
+            routes = [{"origin": origin, "destination": destination, "fees": {}}]
         if mode == "data_especifica":
             departure_text = request.form.get("departure_date", "").strip()
             if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", departure_text):
@@ -771,35 +803,42 @@ def api_search():
         origin, destination = route["origin"], route["destination"]
         for departure, advp in departures:
             found, error = search_one(origin, destination, departure, advp, scope, api_choice)
-            for row in found:
-                fee = route["fees"].get(row["cia"], Decimal("0.00"))
-                if fee == Decimal("0.00") and row.get("taxa") is not None:
-                    try:
-                        fee = Decimal(str(row["taxa"])).quantize(Decimal("0.01"))
-                    except (InvalidOperation, ValueError):
-                        fee = Decimal("0.00")
-                total = Decimal(str(row["preco_total"]))
-                net = max(Decimal("0.00"), total - fee)
-                row["taxa_embarque"] = float(fee)
-                row["tarifa_net"] = float(net.quantize(Decimal("0.01")))
-            sum_total = sum((Decimal(str(row["preco_total"])) for row in found), Decimal("0"))
-            sum_net = sum((Decimal(str(row["tarifa_net"])) for row in found), Decimal("0"))
-            for row in found:
-                row["share_total"] = (float((Decimal(str(row["preco_total"])) * 100 / sum_total).quantize(
-                    Decimal("0.01"), rounding=ROUND_HALF_UP)) if sum_total else None)
-                row["share_net"] = (float((Decimal(str(row["tarifa_net"])) * 100 / sum_net).quantize(
-                    Decimal("0.01"), rounding=ROUND_HALF_UP)) if sum_net else None)
+            if mode == "planilha":
+                for row in found:
+                    fee = route["fees"].get(row["cia"], Decimal("0.00"))
+                    if fee == Decimal("0.00") and row.get("taxa") is not None:
+                        try:
+                            fee = Decimal(str(row["taxa"])).quantize(Decimal("0.01"))
+                        except (InvalidOperation, ValueError):
+                            fee = Decimal("0.00")
+                    total = Decimal(str(row["preco_total"]))
+                    net = max(Decimal("0.00"), total - fee)
+                    row["taxa_embarque"] = float(fee)
+                    row["tarifa_net"] = float(net.quantize(Decimal("0.01")))
+                sum_total = sum((Decimal(str(row["preco_total"])) for row in found), Decimal("0"))
+                sum_net = sum((Decimal(str(row["tarifa_net"])) for row in found), Decimal("0"))
+                for row in found:
+                    row["share_total"] = (float((Decimal(str(row["preco_total"])) * 100 / sum_total).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP)) if sum_total else None)
+                    row["share_net"] = (float((Decimal(str(row["tarifa_net"])) * 100 / sum_net).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP)) if sum_net else None)
+            else:
+                for row in found:
+                    row["taxa_embarque"] = 0.0
+                    row["tarifa_net"] = row["preco_total"]
+                    row["share_total"] = None
+                    row["share_net"] = None
             rows.extend(found)
             if error:
                 errors.append(f"{origin} → {destination}, {advp} dias: {error}")
     token = uuid4().hex
     with connect_db() as db:
         db.execute("INSERT INTO exports (token, rows_json) VALUES (?, ?)",
-                   (token, json.dumps(rows, ensure_ascii=False)))
+                   (token, json.dumps({"mode": mode, "rows": rows}, ensure_ascii=False)))
         db.commit()
-    comparisons = compute_comparisons(rows)
+    comparisons = compute_comparisons(rows) if mode == "planilha" else []
     return jsonify(rows=rows, comparisons=comparisons, errors=errors, token=token, routes=len(routes),
-                   searches=len(routes) * len(departures))
+                   searches=len(routes) * len(departures), mode=mode)
 
 
 @app.get("/export/<token>.xlsx")
@@ -810,8 +849,23 @@ def export(token):
         result = db.execute("SELECT rows_json FROM exports WHERE token = ?", (token,)).fetchone()
     if result is None:
         return "Arquivo não encontrado", 404
-    return send_file(make_xlsx(json.loads(result["rows_json"])), as_attachment=True,
-                     download_name="tarifas_farehub.xlsx",
+    payload = json.loads(result["rows_json"])
+    if isinstance(payload, dict):
+        mode = payload.get("mode", "single")
+        rows = payload.get("rows", [])
+    else:
+        mode = "planilha"
+        rows = payload
+
+    if mode == "single":
+        download_name = "trecho_farehub.xlsx"
+    elif mode == "data_especifica":
+        download_name = "data_especifica_farehub.xlsx"
+    else:
+        download_name = "tarifas_farehub.xlsx"
+
+    return send_file(make_xlsx(rows, mode=mode), as_attachment=True,
+                     download_name=download_name,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
