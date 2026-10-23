@@ -119,10 +119,19 @@
           </div>
         </div>
 
-        <!-- Barra de Progresso durante a busca -->
+        <!-- Barra de Progresso e Animação de Voo durante a busca -->
         <div id="search-status-bar" class="search-status-bar" hidden>
-          <span class="status-pulse"></span>
-          <span id="search-status-text">Consultando tarifas nas companhias...</span>
+          <div class="flight-anim-track">
+            <span class="flight-anim-point" id="anim-orig">ORIG</span>
+            <div class="flight-anim-line">
+              <span class="flight-anim-plane">✈</span>
+            </div>
+            <span class="flight-anim-point" id="anim-dest">DEST</span>
+          </div>
+          <div class="status-info">
+            <span class="status-pulse"></span>
+            <span id="search-status-text">Consultando tarifas em tempo real...</span>
+          </div>
         </div>
 
         <div id="search-error" class="alert-error" hidden></div>
@@ -363,15 +372,6 @@
       return `${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
     }
 
-    // Toggle de taxas opcionais no form avulso
-    $('btn-toggle-fees').addEventListener('click', () => {
-      const inputs = $('fees-inputs');
-      const arrow = $('fees-arrow');
-      const isHidden = inputs.hidden;
-      inputs.hidden = !isHidden;
-      arrow.textContent = isHidden ? '▾' : '▸';
-    });
-
     // Auto-uppercase nos campos IATA e avanço automático de foco
     ['origin', 'destination'].forEach(id => {
       const el = $(id);
@@ -494,6 +494,12 @@
       $('origin').required = !isSheet && !isUsage;
       $('destination').required = !isSheet && !isUsage;
       $('departure-date').required = isDate;
+
+      if (isDate && !$('departure-date').value) {
+        const d = new Date();
+        d.setDate(d.getDate() + 7);
+        $('departure-date').value = d.toISOString().split('T')[0];
+      }
 
       if (isUsage) loadUsage();
     }
@@ -791,13 +797,43 @@
       });
     });
 
-    // Submissão da busca
+    // Esqueleto de carregamento com animação shimmer enquanto busca
+    function showLoadingSkeleton(mode) {
+      const isSheet = mode === 'planilha';
+      const cols = isSheet ? 11 : 10;
+      const tbody = $('results');
+      let html = '';
+      const widths = [65, 80, 50, 50, 75, 55, 65, 80, 70, 55];
+      for (let i = 0; i < 5; i++) {
+        html += '<tr class="skeleton-row">';
+        for (let c = 0; c < cols; c++) {
+          const w = widths[c % widths.length];
+          html += `<td><div class="skeleton-shimmer" style="width: ${w}%;"></div></td>`;
+        }
+        html += '</tr>';
+      }
+      tbody.innerHTML = html;
+    }
+
+    // Submissão da busca com animação de pesquisa
     $('search-form').onsubmit = async e => {
       e.preventDefault();
       $('search-error').hidden = true;
       $('submit').disabled = true;
       $('spinner').hidden = false;
       $('submit-text').textContent = 'Consultando...';
+
+      const mode = $('mode').value;
+      if (mode === 'planilha') {
+        $('anim-orig').textContent = 'ARQUIVO';
+        $('anim-dest').textContent = 'LOTE';
+      } else {
+        const orig = ($('origin').value || 'ORIG').toUpperCase().trim();
+        const dest = ($('destination').value || 'DEST').toUpperCase().trim();
+        $('anim-orig').textContent = orig || 'ORIG';
+        $('anim-dest').textContent = dest || 'DEST';
+      }
+
       $('search-status-bar').hidden = false;
       $('export').hidden = true;
       $('share-panel').hidden = true;
@@ -805,9 +841,28 @@
       $('airline-filters').hidden = true;
       $('result-summary').hidden = true;
 
+      // Mensagens dinâmicas de progresso
+      const messages = [
+        'Consultando tarifas em tempo real...',
+        'Conectando às APIs das companhias aéreas...',
+        'Pesquisando voos LATAM, GOL e Azul...',
+        'Calculando taxas e tarifas em classe econômica...',
+        'Consolidando resultados dos trechos...'
+      ];
+      let msgIdx = 0;
+      $('search-status-text').textContent = messages[0];
+      const statusInterval = setInterval(() => {
+        msgIdx = (msgIdx + 1) % messages.length;
+        $('search-status-text').textContent = messages[msgIdx];
+      }, 1600);
+
+      // Exibe skeleton loader na tabela
+      updateTableHeaders();
+      showLoadingSkeleton(mode);
+
       try {
         const data = new FormData(e.target);
-        if ($('mode').value === 'planilha') {
+        if (mode === 'planilha') {
           data.set('scope', $('scope-sheet').value);
         }
 
@@ -841,7 +896,10 @@
       } catch (err) {
         $('search-error').textContent = err.message;
         $('search-error').hidden = false;
+        const colCount = mode === 'planilha' ? 11 : 10;
+        $('results').innerHTML = `<tr class="empty-row"><td colspan="${colCount}">Erro na consulta: ${escapeHtml(err.message)}</td></tr>`;
       } finally {
+        clearInterval(statusInterval);
         $('submit').disabled = false;
         $('spinner').hidden = true;
         $('submit-text').textContent = 'Pesquisar';
